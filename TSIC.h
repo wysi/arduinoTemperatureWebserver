@@ -8,7 +8,7 @@
 * Version 2
 *		Improvements:
 *		- Arduino > 1.0 compatible
-*		- corrected offset (about +2°C)
+*		- corrected offset (about +2Â°C)
 *		- code run time optimization
 *		- no freezing of system in case sensor gets unplugged
 *		- measure strobetime instead of constant waiting time (-> high temperature stable)
@@ -36,20 +36,17 @@
 
 #include "Arduino.h"
 
-#define TSIC_ON()	digitalWrite(m_vcc_pin, HIGH)
-#define TSIC_OFF()	digitalWrite(m_vcc_pin, LOW)
 #define TSIC_HIGH	digitalRead(m_signal_pin)
 #define TSIC_LOW	!digitalRead(m_signal_pin)
-#define Abbruch()	if (timeout==0){return 0;}				// Abbruch, falls der Sensor abgezogen wird
 
 class TSIC {
 	public:
-		explicit TSIC(uint8_t signal_pin, uint8_t vcc_pin);
+		explicit TSIC(uint8_t signal_pin);
 		uint8_t getTemperture(uint16_t *temp_value16);
 		float calc_Celsius(uint16_t *temperature16);
+		float calc_CelsiusTsic506(uint16_t *temperature16);
 	private:
 		uint8_t m_signal_pin;
-		uint8_t m_vcc_pin;
 		uint8_t readSens(uint16_t *temp_value);
 		uint8_t checkParity(uint16_t *temp_value);
 };

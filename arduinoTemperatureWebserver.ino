@@ -84,14 +84,22 @@ WEBSERVER ACTUALLY DISABLED, because no Port-Forwarding for incomming connection
 //const byte CONTROL_STATUS = 0b00000011;
 
 //TSIC
-TSIC Sensor1(22, 23);    // Signalpin, VCCpin
-TSIC Sensor2(24, 25);    // Signalpin, VCCpin
+//TSIC Sensor1(22, 23);    // Signalpin, VCCpin
+//TSIC Sensor2(24, 25);    // Signalpin, VCCpin
+
+TSIC Sensor1(22);    // Signalpin, VCCpin
+TSIC Sensor2(24);    // Signalpin, VCCpin
+
+float Temp_buffer = 0; 
 
 uint16_t temperature = 0;
 float Temperatur_C = 0;
+float Temp_average = 0;
+
 
 uint16_t temperature2 = 0;
 float Temperatur_C2 = 0;
+float Temp_average2 = 0;
 
 //debug function
 void ShowSockStatus()
@@ -144,6 +152,7 @@ time_t prevDisplay = 0; // when the digital clock was displayed
 time_t utc = 295;
 time_t chTime = 0;
 time_t timer1 = 0;
+time_t measTimer = 0;
 
 unsigned long currentmillis = 0;
 
@@ -195,6 +204,12 @@ void setup()
 	//timer1 = utc - 295;
 	timer1 = 0;
 	
+	//Setup TSIC506F VCC Pins
+	digitalWrite(23,LOW);
+	digitalWrite(25,LOW);
+	pinMode(23,OUTPUT);
+	pinMode(25,OUTPUT);
+
 	
 	currentmillis = millis();
 }
@@ -207,6 +222,7 @@ void loop()
 		//Serial.print("Time");
 	}
 	//if 20 seconds passed, print all safed erros
+	/*
 	if((utc - timer2) > 10){
 		timer2 = utc;
 		Serial.println("");
@@ -217,7 +233,42 @@ void loop()
 		}
 		Serial.println("End off safed Errors");
 	}
+	*/
 	checkSockStatus();
+	
+	if((utc - measTimer) > 28){
+		measTimer = utc;
+		//measure Temperature 10 times and build the average 
+		//Sensor1
+		Temp_buffer = 0;
+		digitalWrite(23,HIGH);
+		delay(80);
+		for(int i = 0; i < 10; i++){
+			if (Sensor1.getTemperture(&temperature) == 0) {
+				Temp_buffer += Sensor1.calc_CelsiusTsic506(&temperature);
+			}
+			else{	//read error -> decrement loop counter -> at the end 10 temperatures have to been read
+				i = i - 1;
+			}
+		}
+		digitalWrite(23,LOW);
+		Temp_average = (9.0*Temp_average + Temp_buffer)/10.0;
+		
+		//Sensor2
+		Temp_buffer = 0;
+		digitalWrite(25,HIGH);
+		delay(80);
+		for(int i = 0; i < 10; i++){
+			if (Sensor2.getTemperture(&temperature2) == 0) {
+				Temp_buffer += Sensor2.calc_CelsiusTsic506(&temperature2);
+			}
+			else{	//read error -> decrement loop counter -> at the end 10 temperatures have to been read
+				i = i - 1;
+			}
+		}
+		digitalWrite(25,LOW);
+		Temp_average2 = (9.0*Temp_average2 + Temp_buffer)/10.0;
+	}
 	
 	//Ethernet Client Loop (send Temp as JSON Object to a webserver), connect only to server, if no webclient is connected to the arduino server
 	//only 3 sockets are available
@@ -230,26 +281,24 @@ void loop()
 			tempClientConnected = 1;
 			Serial.println("connected");
 			//construckt post data:
-			//String PostData = "param1=44";
-			//sensors.requestTemperatures(); // Send the command to get temperatures
-			//delay(10);
-			//float fTemp = sensors.getTempCByIndex(0);
 			
+			/*
 			if (Sensor1.getTemperture(&temperature)) {
 				Temperatur_C = Sensor1.calc_Celsius(&temperature);
-	
 			}
 			
 			if (Sensor2.getTemperture(&temperature2)) {
 				Temperatur_C2 = Sensor2.calc_Celsius(&temperature2);
-
 			}
+			*/
 			
 			
 			Serial.print("Temperature1:");
-			Serial.println(Temperatur_C);
+			//Serial.println(Temperatur_C);
+			Serial.println(Temp_average);
 			Serial.print("Temperature2:");
-			Serial.println(Temperatur_C2);
+			//Serial.println(Temperatur_C2);
+			Serial.println(Temp_average2);
 			//Serial.print("freeMemory()= ");
 			//Serial.println(freeMemory());
 			
@@ -269,9 +318,9 @@ void loop()
 			tempClient.println();
 			//tempClient.println(sbuffer);
 			tempClient.print("{\"badid\": \"44\", \"pincode\": \"12345\", \"temp\": {\"129\": \"");
-			tempClient.print(Temperatur_C);
+			tempClient.print(Temp_average);
 			tempClient.print("\", \"130\": \"");
-			tempClient.print(Temperatur_C2);
+			tempClient.print(Temp_average2);
 			tempClient.print("\"}}");
 			tempClient.println();
 			tempClient.println();
@@ -406,16 +455,16 @@ void checkSockStatus()
 
     if((s == 0x17) || (s == 0x1C)) {
         if(thisTime - connectTime[i] > 16000UL) { //16 seconds
-          Serial.print(F("\r\nSocket frozen: "));
-          Serial.println(i);
-          close(i);
-					tempClientConnected = 0;
-					if(NrOfErrors < MaxNrOfErrors){	//safe error to Erros[]
-						Errors[NrOfErrors] = 7;
-						NrOfErrors++;
-						ErrorBuffer = 0;
-					}
-				}
+			Serial.print(F("\r\nSocket frozen: "));
+			Serial.println(i);
+			close(i);
+			tempClientConnected = 0;
+			if(NrOfErrors < MaxNrOfErrors){	//safe error to Erros[]
+				Errors[NrOfErrors] = 7;
+				NrOfErrors++;
+				ErrorBuffer = 0;
+			}
+		}
     }
     else connectTime[i] = thisTime;
 

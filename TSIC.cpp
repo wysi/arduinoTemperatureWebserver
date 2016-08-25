@@ -4,11 +4,26 @@
 *
 * Copyright: Rolf Wagner
 * Date: March 9th 2014
-*
+* 
+* Version 2.1 (changes by Matthias Eibl, 2015-03-31)
+* 		- if the TSIC returns an error, the Power PIN is 
+* 		  turned LOW (otherwise it produces errors as the 
+* 		  start for a healthy sensor is not defined properly.)
+* 		- the timeouts are optimized for a faster identification of 
+* 		  not connected sensors (if no sensor is connected, the 
+* 		  Data Pin will remain in state LOW. As the strobe is usually
+* 		  ~ 60us, it is sufficient to set the timeout to a value of
+* 		  <<100 loops in the second while loop "while (TSIC_LOW){..."
+* 		  in the function "TSIC::readSens". One cycle is -depending on
+* 		  the CPU frequency used- ~10us.)
+* 
+* 
+* 
+* 
 * Version 2
 *		Improvements:
 *		- Arduino > 1.0 compatible
-*		- corrected offset (about +2°C)
+*		- corrected offset (about +2Â°C)
 *		- code run time optimization
 *		- no freezing of system in case sensor gets unplugged
 *		- measure strobetime instead of constant waiting time (-> high temperature stable)
@@ -34,48 +49,60 @@
 #include "Arduino.h"
 #include "TSIC.h"
 
-// Init der Aus/Eingänge
-TSIC::TSIC(uint8_t signal_pin, uint8_t vcc_pin)
-	: m_signal_pin(signal_pin), m_vcc_pin(vcc_pin) 
+// Initialize inputs/outputs
+TSIC::TSIC(uint8_t signal_pin) : m_signal_pin(signal_pin)
 {
-    pinMode(m_vcc_pin, OUTPUT);
     pinMode(m_signal_pin, INPUT);
 }
 
-// auslesen der Temperatur
+// read temperature
 uint8_t TSIC::getTemperture(uint16_t *temp_value16){
 		uint16_t temp_value1 = 0;
 		uint16_t temp_value2 = 0;
+		uint16_t timeout_high = 0;
+		uint16_t timeout_low = 0;
+		
+		// wait for a stable high on the bus for at least 1000 microseconds to avoid starting in the middle of a transmission
+		while(true)
+		{			
+			delayMicroseconds(11); // prime number to avoid multiples of 10
 
-		TSIC_ON();
-		delayMicroseconds(50);     // wait for stabilization
-		if(TSIC::readSens(&temp_value1)){}			// 1. Byte einlesen
-		else return 0;
-		if(TSIC::readSens(&temp_value2)){}			// 2. Byte einlesen
-		else return 0;
-		if(checkParity(&temp_value1)){}		// Parity vom 1. Byte prüfen
-		else return 0;
-		if(checkParity(&temp_value2)){}		// Parity vom 2. Byte prüfen
-		else return 0;
+			if (TSIC_LOW) timeout_low += 11;
+			else timeout_low = 0;
+			if( timeout_low > 10000) return 1; // avoid waiting on a permanent low level due to unconnected sensor, abort after 10msec
 
-		TSIC_OFF();		// Sensor ausschalten
+			if (TSIC_HIGH) timeout_high += 11;
+			else timeout_high = 0;
+			if( timeout_high > 1000) break;	// wait for stable high level > 1000 usec on the bus
+		}
+		
+		if(TSIC::readSens(&temp_value1) == 0) return 2;	// get 1st byte
+		if(TSIC::readSens(&temp_value2) == 0) return 3; // get 2nd byte
+		if(checkParity(&temp_value1) == 0) return 4; // parity-check 1st byte
+		if(checkParity(&temp_value2) == 0) return 5; // parity-check 2nd byte
+		
 		*temp_value16 = (temp_value1 << 8) + temp_value2;
-		return 1;
+		return 0;
 }
 
 //-------------Unterprogramme-----------------------------------------------------------------------
 
-/*	Konvertieren der Temperatur aus unsinged Integer in °C mit einer Nachkommastelle
-	Die Umrechnung ist geschwindigkeitsoptimiert. Dadurch wird die Genauigkeit minimal verschlechtert (@25°C um -0,0366°C).
+/*	Temperature conversion from uint to float in Â°C with 1 decimal place.
+	The calculation is speed-optimized at the cost of a sligtly worse temperature resolution (about -0,0366Â°C @25Â°C).
 */
 float TSIC::calc_Celsius(uint16_t *temperature16){
 	uint16_t temp_value16 = 0;
-	unsigned long temp_buffer = 0;
 	float celsius = 0;
-	//temp_value16 = ((*temperature16 * 250L) >> 8) - 500;			// Temperatur *10 also 26,4 = 264
-	//celsius = temp_value16 / 10 + (float) (temp_value16 % 10) / 10;	// Temperatur mit 1 Nachkommastelle z.b. 26,4°C
-	temp_buffer = *temperature16;
-	celsius =  ((float) temp_buffer * 70 / 2047) - 10;
+	temp_value16 = ((*temperature16 * 250L) >> 8) - 500;			// calculate temperature *10, i.e. 26,4 = 264
+	celsius = temp_value16 / 10 + (float) (temp_value16 % 10) / 10;	// shift comma by 1 digit e.g. 26,4Â°C
+	return celsius;
+}
+
+/* Different temperature conversion required for the Tsic 506 sensors */
+float TSIC::calc_CelsiusTsic506(uint16_t *temperature16){
+	float celsius = 0;
+    celsius = ((((float)(*temperature16)) * 7000) / 2047) - 1000; // conversion equation from TSic's 506 data sheet
+    celsius = celsius / 100;
 	return celsius;
 }
 
@@ -84,26 +111,29 @@ uint8_t TSIC::readSens(uint16_t *temp_value){
 	uint16_t strobetemp = 0;
 	uint8_t dummy = 0;
 	uint16_t timeout = 0;
+
 	while (TSIC_HIGH){	// wait until start bit starts
 		timeout++;
-		delayMicroseconds(5);	// sonst kommt es zum Abbruch
-		Abbruch();
+		delayMicroseconds(10);
+		if (timeout > 10000) return 0;
 	}
-	// Measure strobe time
+	// Measure strobe time, a healthy sensor will go to LOW within a few loops (~60us)
+	// if no sensor is connected, the timeout cancels the operation (-> 100cycles are more than enough for this)
 	strobelength = 0;
-	timeout = 0;
+	timeout = 0;		// max value for timeout is set in .h file
+	
 	while (TSIC_LOW) {    // wait for rising edge
 		strobelength++;
 		timeout++;
-		delayMicroseconds(5);
-		Abbruch();
+		delayMicroseconds(10);
+		if (timeout > 100) return 0;
 	}
 	for (uint8_t i=0; i<9; i++) {
 		// Wait for bit start
 		timeout = 0;
 		while (TSIC_HIGH) { // wait for falling edge
 			timeout++;
-			Abbruch();
+			if (timeout > 10000) return 0;
 		}
 		// Delay strobe length
 		timeout = 0;
@@ -112,8 +142,8 @@ uint8_t TSIC::readSens(uint16_t *temp_value){
 		while (strobetemp--) {
 			timeout++;
 			dummy++;
-			delayMicroseconds(5);	// sonst kommt es zum Abbruch
-			Abbruch();
+			delayMicroseconds(10);
+			if (timeout > 10000) return 0;
 		}
 		*temp_value <<= 1;
 		// Read bit
@@ -124,7 +154,7 @@ uint8_t TSIC::readSens(uint16_t *temp_value){
 		timeout = 0;
 		while (TSIC_LOW) {		// wait for rising edge
 			timeout++;
-			Abbruch();
+			if (timeout > 10000) return 0;
 		}
 	}
 	return 1;
@@ -138,7 +168,7 @@ uint8_t TSIC::checkParity(uint16_t *temp_value) {
 			parity++;
 	}
 	if (parity % 2)
-		return 0;				// Parityfehler
-	*temp_value >>= 1;          // Parity Bit löschen
+		return 0;				// wrong parity
+	*temp_value >>= 1;          // delete parity bit
 	return 1;
 }
