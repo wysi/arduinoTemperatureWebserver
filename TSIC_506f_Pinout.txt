@@ -1,0 +1,16 @@
+TSIC 506f Temperatur-Sensor Pinbelegung / Pinout
+
+TO92 von unten gesehen:
+
+Rund
+
+1 2 3
+GND Signal V+ (Speisung)
+
+Flach
+
+
+Kabel Farben:
+1 2 3
+Weiss Braun Grün
+Schwarz Rot Grün
