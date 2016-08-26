@@ -154,6 +154,11 @@ time_t chTime = 0;
 time_t timer1 = 0;
 time_t measTimer = 0;
 
+//first temperature read?
+int firstRead = 1;
+//error while reading'
+int readError = 0;
+
 unsigned long currentmillis = 0;
 
 unsigned int measureOn = 100;
@@ -198,7 +203,7 @@ void setup()
 	//Serial.print("freeMemory()= ");
 	//Serial.println(freeMemory());
 	
-	Serial.println("waiting for sync");
+	//Serial.println("waiting for sync");
 	//setSyncProvider(getNtpTime);
 	//utc = now();
 	//timer1 = utc - 295;
@@ -237,37 +242,79 @@ void loop()
 	checkSockStatus();
 	
 	if((utc - measTimer) > 28){
+		Serial.println("Measurement started");
 		measTimer = utc;
 		//measure Temperature 10 times and build the average 
 		//Sensor1
 		Temp_buffer = 0;
+		readError = 0;
 		digitalWrite(23,HIGH);
-		delay(80);
+		delay(85);
 		for(int i = 0; i < 10; i++){
 			if (Sensor1.getTemperture(&temperature) == 0) {
 				Temp_buffer += Sensor1.calc_CelsiusTsic506(&temperature);
+				//Serial.print("Read1: ");
+				//Serial.println(i);
 			}
 			else{	//read error -> decrement loop counter -> at the end 10 temperatures have to been read
 				i = i - 1;
+				readError++;
+				if(readError > 5){
+					break;
+				}
+				Serial.print("Error1: ");
+				Serial.println(i);
 			}
 		}
 		digitalWrite(23,LOW);
-		Temp_average = (9.0*Temp_average + Temp_buffer)/10.0;
+		Temp_buffer = Temp_buffer / 10.0;
+		if(firstRead){
+			Temp_average = Temp_buffer;
+		}
+		else{
+			Temp_average = (9.0*Temp_average + Temp_buffer)/10.0;
+		}
+		Serial.print("Temp1: ");
+		Serial.print(Temp_buffer);
+		Serial.print(" Avr1: ");
+		Serial.println(Temp_average);	
 		
 		//Sensor2
 		Temp_buffer = 0;
+		readError = 0;
 		digitalWrite(25,HIGH);
-		delay(80);
+		delay(85);
 		for(int i = 0; i < 10; i++){
 			if (Sensor2.getTemperture(&temperature2) == 0) {
 				Temp_buffer += Sensor2.calc_CelsiusTsic506(&temperature2);
+				//Serial.print("Read2: ");
+				//Serial.println(i);
 			}
 			else{	//read error -> decrement loop counter -> at the end 10 temperatures have to been read
 				i = i - 1;
+				readError++;
+				if(readError > 5){
+					break;
+				}
+				Serial.print("Error2: ");
+				Serial.println(i);
 			}
 		}
 		digitalWrite(25,LOW);
-		Temp_average2 = (9.0*Temp_average2 + Temp_buffer)/10.0;
+		Temp_buffer = Temp_buffer / 10.0; 
+		if(firstRead){
+			Temp_average2 = Temp_buffer;
+		}
+		else{
+			Temp_average2 = (9.0*Temp_average2 + Temp_buffer)/10.0;
+		}
+		Serial.print(" Temp2: ");
+		Serial.print(Temp_buffer);
+		Serial.print(" Avr2: ");
+		Serial.println(Temp_average2);
+		if(firstRead){
+			firstRead = 0;
+		}
 	}
 	
 	//Ethernet Client Loop (send Temp as JSON Object to a webserver), connect only to server, if no webclient is connected to the arduino server
